@@ -1,129 +1,179 @@
-import { useNavigation } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
-import { fetchWorkoutLogs } from '../src/types/../services/db';
+import { ActivityIndicator, FlatList, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { getDatabaseConnection } from '../src/services/db';
 
-interface LogItem {
+interface CompletedWorkoutLog {
   id: number;
   workout_name: string;
-  completed_at: string;
-  total_sets: number;
+  split_type: string;
+  date_logged: string;
+  total_sets_completed: number;
+}
+
+interface CalendarLog {
+  id: number;
+  log_date: string;
+  status_type: 'WORKOUT' | 'REST' | 'UNMARKED';
 }
 
 export default function ProgressScreen() {
-  const [logs, setLogs] = useState<LogItem[]>([]);
+  const [logs, setLogs] = useState<CompletedWorkoutLog[]>([]);
+  const [, setCalendarDays] = useState<Record<string, CalendarLog>>({});
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const navigation = useNavigation();
 
-  // Refresh data every time tab gains focus
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      setIsLoading(true);
-      fetchWorkoutLogs()
-        .then((data) => setLogs(data))
-        .catch((err) => console.error(err))
-        .finally(() => setIsLoading(false));
-    });
+    async function fetchHistoricalData() {
+      try {
+        const db = await getDatabaseConnection();
+        
+        const workoutLogs = await db.getAllAsync<CompletedWorkoutLog>(
+          'SELECT id, workout_name, split_type, date_logged, total_sets_completed FROM completed_workouts ORDER BY id DESC;'
+        );
+        
+        const dayLogs = await db.getAllAsync<CalendarLog>(
+          'SELECT id, log_date, status_type FROM calendar_logs;'
+        );
 
-    return unsubscribe;
-  }, [navigation]);
+        const calendarMap: Record<string, CalendarLog> = {};
+        dayLogs.forEach((day) => {
+          calendarMap[day.log_date] = day;
+        });
+
+        setLogs(workoutLogs);
+        setCalendarDays(calendarMap);
+      } catch (error: unknown) {
+        console.error('Error fetching historical logs from SQLite:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchHistoricalData();
+  }, []);
 
   if (isLoading) {
     return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color="#007AFF" />
-      </View>
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#10B981" />
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.dashboardContainer}>
-      <FlatList
-        data={logs}
-        keyExtractor={(item) => item.id.toString()}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
-          <View style={styles.logCard}>
-            <View>
-              <Text style={styles.workoutName}>{item.workout_name}</Text>
-              <Text style={styles.logDate}>Completed on: {item.completed_at}</Text>
+    <SafeAreaView style={styles.container}>
+      <Text style={styles.headerTitle}>Training Logs & History</Text>
+      
+      {logs.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No completed workouts found yet.</Text>
+          <Text style={styles.emptySubText}>Finish your first queued tracking workspace session to populate metrics.</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={logs}
+          keyExtractor={(item) => item.id.toString()}
+          contentContainerStyle={styles.listContainer}
+          renderItem={({ item }) => (
+            <View style={styles.card}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.workoutName}>{item.workout_name}</Text>
+                <Text style={styles.dateBadge}>{item.date_logged}</Text>
+              </View>
+              <View style={styles.cardFooter}>
+                <Text style={styles.metaText}>Split Type: {item.split_type.replace('_', ' ')}</Text>
+                <Text style={styles.metaHighlight}>{item.total_sets_completed} Sets Logged ✓</Text>
+              </View>
             </View>
-            <View style={styles.setsBadge}>
-              <Text style={styles.setsText}>{item.total_sets} Sets</Text>
-            </View>
-          </View>
-        )}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No completed workout logs found yet.</Text>
-            <Text style={styles.emptySubtext}>Finish a session on your Today tab to start history tracking.</Text>
-          </View>
-        }
-      />
-    </View>
+          )}
+        />
+      )}
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1C1C1E',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 16,
   },
-  dashboardContainer: {
+  loadingContainer: {
     flex: 1,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: '#0F172A',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  listContent: {
-    padding: 16,
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#F8FAFC',
+    marginVertical: 20,
   },
-  logCard: {
-    backgroundColor: '#2C2C2E',
+  listContainer: {
+    paddingBottom: 24,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#94A3B8',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  emptySubText: {
+    fontSize: 14,
+    color: '#64748B',
+    textAlign: 'center',
+  },
+  card: {
+    backgroundColor: '#1E293B',
     borderRadius: 12,
     padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  cardHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 12,
   },
   workoutName: {
-    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
-    marginBottom: 4,
+    color: '#F8FAFC',
+    flex: 1,
   },
-  logDate: {
-    color: '#8E8E93',
-    fontSize: 13,
-  },
-  setsBadge: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  setsText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    marginTop: 60,
-    paddingHorizontal: 20,
-  },
-  emptyText: {
-    color: '#FFFFFF',
-    fontSize: 16,
+  dateBadge: {
+    fontSize: 12,
     fontWeight: '600',
-    textAlign: 'center',
+    color: '#10B981',
+    backgroundColor: '#064E3B',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
-  emptySubtext: {
-    color: '#8E8E93',
-    fontSize: 14,
-    textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 20,
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+    paddingTop: 12,
+  },
+  metaText: {
+    fontSize: 13,
+    color: '#94A3B8',
+  },
+  metaHighlight: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#38BDF8',
   },
 });
