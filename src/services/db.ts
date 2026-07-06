@@ -1,6 +1,5 @@
 import * as SQLite from 'expo-sqlite';
 
-// Strict Type Declarations for Relational Data Layer Schema
 export interface ExerciseRecord {
   id?: number;
   name: string;
@@ -27,7 +26,6 @@ export interface WorkoutExerciseRecord {
   target_reps: number;
 }
 
-// Global reference wrapper to open our persistent local DB thread natively
 let databaseInstance: SQLite.SQLiteDatabase | null = null;
 
 export async function getDatabaseConnection(): Promise<SQLite.SQLiteDatabase> {
@@ -37,14 +35,9 @@ export async function getDatabaseConnection(): Promise<SQLite.SQLiteDatabase> {
   return databaseInstance;
 }
 
-/**
- * Core Relational Initializer Engine
- * Creates structure mappings and seeds default workout frames safely
- */
 export async function initDatabase(): Promise<void> {
   const db = await getDatabaseConnection();
 
-  // 1. Initialize Relational Structural Graph Layout
   await db.execAsync(`
     PRAGMA foreign_keys = ON;
 
@@ -80,35 +73,38 @@ export async function initDatabase(): Promise<void> {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       workout_name TEXT NOT NULL,
       split_type TEXT NOT NULL,
-      date_logged TEXT NOT NULL, -- Format: YYYY-MM-DD
+      date_logged TEXT NOT NULL,
       total_sets_completed INTEGER NOT NULL
+    );
+
+    -- 🌟 New table to store exact granular exercise sets for drill-down review modals
+    CREATE TABLE IF NOT EXISTS completed_workout_sets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      completed_workout_id INTEGER NOT NULL,
+      exercise_name TEXT NOT NULL,
+      weight_logged TEXT NOT NULL,
+      reps_logged TEXT NOT NULL,
+      set_order INTEGER NOT NULL,
+      FOREIGN KEY (completed_workout_id) REFERENCES completed_workouts (id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS calendar_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      log_date TEXT UNIQUE NOT NULL, -- Format: YYYY-MM-DD
-      status_type TEXT NOT NULL,     -- 'WORKOUT' | 'REST' | 'UNMARKED'
+      log_date TEXT UNIQUE NOT NULL,
+      status_type TEXT NOT NULL,
       workout_session_id INTEGER NULL,
       FOREIGN KEY (workout_session_id) REFERENCES completed_workouts (id) ON DELETE SET NULL
     );
   `);
 
-  // 2. Idempotent Data Seeding Check
   const exerciseCheck = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM exercises;');
   
   if (exerciseCheck && exerciseCheck.count === 0) {
-    console.log('--- Phase 2: Seeding Master Relational Exercise Matrix Matrix ---');
     await seedMasterExercises(db);
     await seedPredefinedRoutines(db);
-    console.log('--- Relational Data Layer Initialization Complete ---');
-  } else {
-    console.log('Database verification safe: Relational records already seeded.');
   }
 }
 
-/**
- * Seeds our complete exercise registry with strict anatomical multipliers
- */
 async function seedMasterExercises(db: SQLite.SQLiteDatabase): Promise<void> {
   const rawMatrix = [
     { name: "Flat Machine Chest Press", primary: "Chest", sub: "Middle Chest", difficulty: 1, gender: "U" },
@@ -210,16 +206,12 @@ async function seedMasterExercises(db: SQLite.SQLiteDatabase): Promise<void> {
     else if (item.primary === 'Abs') multiplier = 0.20;
 
     await db.runAsync(
-      `INSERT INTO exercises (name, primary_muscle, sub_muscle, difficulty, gender, base_multiplier) 
-       VALUES (?, ?, ?, ?, ?, ?);`,
+      `INSERT INTO exercises (name, primary_muscle, sub_muscle, difficulty, gender, base_multiplier) VALUES (?, ?, ?, ?, ?, ?);`,
       [item.name, item.primary, item.sub, item.difficulty, item.gender, multiplier]
     );
   }
 }
 
-/**
- * Seeds framework definitions for 3-Day, 4-Day, and 5-Day splits
- */
 async function seedPredefinedRoutines(db: SQLite.SQLiteDatabase): Promise<void> {
   const splitsDef = [
     { name: 'Workout A (Push Day A)', split: '3_DAY', order: 1 },
@@ -229,31 +221,25 @@ async function seedPredefinedRoutines(db: SQLite.SQLiteDatabase): Promise<void> 
     { name: 'Workout E (Pull Day B)', split: '3_DAY', order: 5 },
     { name: 'Workout F (Legs Day B)', split: '3_DAY', order: 6 },
     
-    { name: 'Day 1: Chest & Triceps', split: '4_DAY', order: 1 },
-    { name: 'Day 2: Back', split: '4_DAY', order: 2 },
-    { name: 'Day 3: Shoulder & Biceps', split: '4_DAY', order: 3 },
-    { name: 'Day 4: Legs', split: '4_DAY', order: 4 },
+    { name: 'Chest & Triceps', split: '4_DAY', order: 1 },
+    { name: 'Back', split: '4_DAY', order: 2 },
+    { name: 'Shoulder & Biceps', split: '4_DAY', order: 3 },
+    { name: 'Legs', split: '4_DAY', order: 4 },
 
-    { name: 'Day 1: Chest Day', split: '5_DAY', order: 1 },
-    { name: 'Day 2: Back Day', split: '5_DAY', order: 2 },
-    { name: 'Day 3: Arms Day', split: '5_DAY', order: 3 },
-    { name: 'Day 4: Shoulder Day', split: '5_DAY', order: 4 },
-    { name: 'Day 5: Legs Day', split: '5_DAY', order: 5 }
+    { name: 'Chest', split: '5_DAY', order: 1 },
+    { name: 'Back', split: '5_DAY', order: 2 },
+    { name: 'Arms', split: '5_DAY', order: 3 },
+    { name: 'Shoulders', split: '5_DAY', order: 4 },
+    { name: 'Legs', split: '5_DAY', order: 5 }
   ];
 
   for (const w of splitsDef) {
-    await db.runAsync(
-      'INSERT INTO workouts (name, split_type, day_order) VALUES (?, ?, ?);',
-      [w.name, w.split, w.order]
-    );
+    await db.runAsync('INSERT INTO workouts (name, split_type, day_order) VALUES (?, ?, ?);', [w.name, w.split, w.order]);
   }
 
   await linkPredefinedWorkoutExercises(db);
 }
 
-/**
- * Connects exercises to routine splits matching the structural criteria
- */
 async function linkPredefinedWorkoutExercises(db: SQLite.SQLiteDatabase): Promise<void> {
   const findExerciseId = async (name: string): Promise<number> => {
     const res = await db.getFirstAsync<{ id: number }>('SELECT id FROM exercises WHERE name = ?;', [name]);
@@ -282,12 +268,10 @@ async function linkPredefinedWorkoutExercises(db: SQLite.SQLiteDatabase): Promis
   }
 }
 
-/**
- * Purges historical progress records and logs completely out of local SQLite tables
- */
 export async function clearAllLogsAndHistory(): Promise<void> {
   const db = await getDatabaseConnection();
   await db.execAsync(`
+    DELETE FROM completed_workout_sets;
     DELETE FROM completed_workouts;
     DELETE FROM calendar_logs;
     VACUUM;

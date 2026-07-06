@@ -30,7 +30,7 @@ export default function RootLayoutShell() {
           tabBarLabelStyle: {
             fontSize: 13,
             fontWeight: '800',
-            paddingBottom: 14, // Aligns labels nicely in the center of the bar
+            paddingBottom: 14,
           },
           tabBarStyle: {
             backgroundColor: '#000000',
@@ -40,10 +40,17 @@ export default function RootLayoutShell() {
           },
         }}
       >
+        {/* Core Workspace Dashboard Tracker Screen */}
         <Tabs.Screen name="index" options={{ title: 'Today', tabBarIcon: () => null }} />
+        
+        {/* Core Integrated Weekly Calendar Progress Logs Screen */}
         <Tabs.Screen name="progress" options={{ title: 'Progress', tabBarIcon: () => null }} />
-        <Tabs.Screen name="calendar" options={{ title: 'Calendar', tabBarIcon: () => null }} />
+        
+        {/* Core Editable User Profile Settings Screen */}
         <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: () => null }} />
+
+        {/* 🌟 Hides old standalone calendar screen completely from tab bars rendering matrix if it exists in route logs folders */}
+        <Tabs.Screen name="calendar" options={{ href: null }} />
       </Tabs>
     </View>
   );

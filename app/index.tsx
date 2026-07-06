@@ -2,7 +2,6 @@ import Slider from '@react-native-community/slider';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Dimensions,
   FlatList,
   Modal,
   ScrollView,
@@ -15,8 +14,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getDatabaseConnection, initDatabase } from '../src/services/db';
 import { useUserStore } from '../src/services/store';
-
-const { width } = Dimensions.get('window');
 
 interface ActiveTrackedExercise {
   workout_exercise_id: number;
@@ -207,14 +204,29 @@ export default function WorkspaceDashboard() {
         ex.sets.forEach(s => { if (s.isCompleted) totalSets++; });
       });
 
-      await db.runAsync(
+      // 1. Log workout master row
+      const result = await db.runAsync(
         'INSERT INTO completed_workouts (workout_name, split_type, date_logged, total_sets_completed) VALUES (?, ?, ?, ?);',
         [activeWorkoutName, store.activeSplit, timestamp, totalSets]
       );
 
+      const insertedWorkoutId = result.lastInsertRowId;
+
+      // 2. Log granular completed exercise sets for non-editable summary modal views
+      for (const ex of trackedExercises) {
+        const completedSets = ex.sets.filter(s => s.isCompleted);
+        for (let i = 0; i < completedSets.length; i++) {
+          await db.runAsync(
+            `INSERT INTO completed_workout_sets (completed_workout_id, exercise_name, weight_logged, reps_logged, set_order)
+             VALUES (?, ?, ?, ?, ?);`,
+            [insertedWorkoutId, ex.name, completedSets[i].weight, completedSets[i].reps, i + 1]
+          );
+        }
+      }
+
       await db.runAsync(
-        'INSERT OR REPLACE INTO calendar_logs (log_date, status_type, workout_session_id) VALUES (?, ?, (SELECT last_insert_rowid()));',
-        [timestamp, 'WORKOUT']
+        'INSERT OR REPLACE INTO calendar_logs (log_date, status_type, workout_session_id) VALUES (?, ?, ?);',
+        [timestamp, 'WORKOUT', insertedWorkoutId]
       );
 
       alert('Workout Cleanly Logged! 💪');
@@ -372,7 +384,6 @@ export default function WorkspaceDashboard() {
                     onPress={() => setFormSplit(split.key)}
                   >
                     <Text style={[styles.splitChipMainText, isActive && styles.splitChipMainTextActive]}>{split.label}</Text>
-                    {/* Inline Expansion Block Container Layout */}
                     {isActive && (
                       <View style={styles.inlineExplanationWrapper}>
                         <Text style={styles.inlineExplanationText}>{splitDescriptions[split.key]}</Text>
