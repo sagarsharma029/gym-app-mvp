@@ -1,4 +1,4 @@
-import Slider from '@react-native-community/slider'; // Ensure your project has this or uses native layouts fallback
+import Slider from '@react-native-community/slider';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -38,7 +38,6 @@ interface ActiveTrackedExercise {
 export default function WorkspaceDashboard() {
   const store = useUserStore();
   
-  // App Boot & Internal Stage Loops States
   const [isSplashing, setIsSplashing] = useState<boolean>(true);
   const [onboardingStage, setOnboardingStage] = useState<'WELCOME' | 'STEP_1' | 'STEP_2'>('WELCOME');
   
@@ -46,30 +45,26 @@ export default function WorkspaceDashboard() {
   const [trackedExercises, setTrackedExercises] = useState<ActiveTrackedExercise[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   
-  // Workspace Tracker Modal States
   const [isModalVisible, setIsModalVisible] = useState<boolean>(false);
   const [customName, setCustomName] = useState<string>('');
   const [customPrimary, setCustomPrimary] = useState<string>('Chest');
   const [customSub, setCustomSub] = useState<string>('');
 
-  // Premium Onboarding Form Values Defaults
   const [formAge, setFormAge] = useState<number>(22);
-  const [formWeight, setFormWeight] = useState<number>(75); // Slider default in kg
-  const [formHeight, setFormHeight] = useState<number>(175); // Slider default in cm
-  const [formGender, setFormGender] = useState<'M' | 'F' | 'U'>('U');
+  const [formWeight, setFormWeight] = useState<number>(75);
+  const [formHeight, setFormHeight] = useState<number>(175);
+  const [formGender, setFormGender] = useState<'M' | 'F' | 'U'>('M');
   const [formExp, setFormExp] = useState<'Beginner' | 'Familiar' | 'Advanced'>('Beginner');
   const [formSplit, setFormSplit] = useState<'3_DAY' | '4_DAY' | '5_DAY' | 'CUSTOM'>('5_DAY');
 
-  // Descriptions for dynamically selected splits
   const splitDescriptions = {
     '3_DAY': 'Alternating Push, Pull, Legs sequence loop. Excellent for baseline motor recovery paths.',
-    '4_DAY': 'Focused Upper/Lower targeted muscle isolation volume framework layout.',
+    '4_DAY': '4-Day strategic split targeting Chest/Triceps, Back, Shoulder/Biceps, and Legs sequentially.',
     '5_DAY': 'Premium Hypertrophy Bro-Split sequence targeting explicit standalone muscle groups daily.',
-    'CUSTOM': 'Completely blank sheet mapping. Build your daily routines fully from scratch.'
+    'CUSTOM': 'Be your own master. Select your own exercises and make your custom split.'
   };
 
   useEffect(() => {
-    // 500ms Splash branding timer logic sequence
     const timer = setTimeout(() => {
       setIsSplashing(false);
     }, 500);
@@ -99,7 +94,7 @@ export default function WorkspaceDashboard() {
     );
 
     if (!currentWorkout) {
-      setActiveWorkoutName(`${store.activeSplit.replace('_', ' ')} Session`);
+      setActiveWorkoutName(store.activeSplit === 'CUSTOM' ? 'Custom Session' : `${store.activeSplit.replace('_', ' ')} Session`);
       setTrackedExercises([]);
       return;
     }
@@ -240,7 +235,6 @@ export default function WorkspaceDashboard() {
     });
   }
 
-  // 1. BRANDING SPLIT FLASH WINDOW
   if (isSplashing) {
     return (
       <View style={styles.splashContainer}>
@@ -258,11 +252,9 @@ export default function WorkspaceDashboard() {
     );
   }
 
-  // 2. STYLED NIKE-THEME MULTI-STEP ONBOARDING ENGINE FLOW
   if (!store.isOnboarded) {
     return (
       <SafeAreaView style={styles.onboardingContainer}>
-        
         {onboardingStage === 'WELCOME' && (
           <View style={styles.fullFlexContent}>
             <View style={styles.centerHeroBlock}>
@@ -302,7 +294,7 @@ export default function WorkspaceDashboard() {
               minimumTrackTintColor="#FF6B00"
               maximumTrackTintColor="#222222"
               thumbTintColor="#FF6B00"
-              onValueChange={(val: number) => setFormHeight(val)}
+              onValueChange={(val) => setFormHeight(val)}
             />
 
             <Text style={styles.sectionQuestionTitle}>Current weight?</Text>
@@ -316,7 +308,7 @@ export default function WorkspaceDashboard() {
               minimumTrackTintColor="#FF6B00"
               maximumTrackTintColor="#222222"
               thumbTintColor="#FF6B00"
-              onValueChange={(val: number) => setFormWeight(val)}
+              onValueChange={(val) => setFormWeight(val)}
             />
 
             <View style={styles.formFooterRowBlock}>
@@ -333,9 +325,8 @@ export default function WorkspaceDashboard() {
             <Text style={styles.sectionQuestionTitle}>Select preferred profile</Text>
             <View style={styles.genderChipRow}>
               {([
-                { key: 'M', label: 'Male Profile' },
-                { key: 'F', label: 'Female Profile' },
-                { key: 'U', label: 'Unisex Baseline' }
+                { key: 'M', label: 'Male' },
+                { key: 'F', label: 'Female' }
               ] as const).map(g => (
                 <TouchableOpacity 
                   key={g.key} 
@@ -367,26 +358,35 @@ export default function WorkspaceDashboard() {
 
             <Text style={styles.sectionQuestionTitle}>Workout split structure</Text>
             <View style={styles.splitSelectionColumnWrap}>
-              {(['3_DAY', '4_DAY', '5_DAY', 'CUSTOM'] as const).map(split => (
-                <TouchableOpacity 
-                  key={split} 
-                  style={[styles.splitSelectionRowChip, formSplit === split && styles.splitSelectionRowChipActive]} 
-                  onPress={() => setFormSplit(split)}
-                >
-                  <Text style={[styles.splitChipMainText, formSplit === split && styles.splitChipMainTextActive]}>{split.replace('_', ' ')} Split</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Dynamic context block displaying contextual help based on split selection */}
-            <View style={styles.dynamicSplitExplanationContainer}>
-              <Text style={styles.explanationTextContent}>{splitDescriptions[formSplit]}</Text>
+              {([
+                { key: '3_DAY', label: '3 Day Split' },
+                { key: '4_DAY', label: '4 Day Split' },
+                { key: '5_DAY', label: '5 Day Split' },
+                { key: 'CUSTOM', label: 'Custom Split' }
+              ] as const).map(split => {
+                const isActive = formSplit === split.key;
+                return (
+                  <TouchableOpacity 
+                    key={split.key} 
+                    style={[styles.splitSelectionRowChip, isActive && styles.splitSelectionRowChipActive]} 
+                    onPress={() => setFormSplit(split.key)}
+                  >
+                    <Text style={[styles.splitChipMainText, isActive && styles.splitChipMainTextActive]}>{split.label}</Text>
+                    {/* Inline Expansion Block Container Layout */}
+                    {isActive && (
+                      <View style={styles.inlineExplanationWrapper}>
+                        <Text style={styles.inlineExplanationText}>{splitDescriptions[split.key]}</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             <View style={styles.formFooterRowBlock}>
               <Text style={styles.stepIndicatorLabelText}>Step 2 of 2</Text>
-              <TouchableOpacity style={styles.nikePrimaryBtn} onPress={useUserStore.getState().isOnboarded ? () => {} : runOnboardingSubmit}>
-                <Text style={styles.nikePrimaryBtnText}>Let's Lift 💪</Text>
+              <TouchableOpacity style={styles.nikePrimaryBtn} onPress={runOnboardingSubmit}>
+                <Text style={styles.nikePrimaryBtnText}>Let's Lift</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -395,7 +395,6 @@ export default function WorkspaceDashboard() {
     );
   }
 
-  // 3. CORE ACTIVE TRACKING CONTEXT DISPLAY (POST-ONBOARDING MAPPED VIEW)
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -486,7 +485,6 @@ export default function WorkspaceDashboard() {
 }
 
 const styles = StyleSheet.create({
-  // Premium Minimalist Dark Theme Palette Configuration
   container: { flex: 1, backgroundColor: '#000000' },
   onboardingContainer: { flex: 1, backgroundColor: '#000000' },
   centeredContainer: { flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center' },
@@ -510,10 +508,10 @@ const styles = StyleSheet.create({
   nikeSliderTrack: { width: '100%', height: 40, marginBottom: 12 },
   formFooterRowBlock: { marginTop: 40, width: '100%', alignItems: 'center' },
   stepIndicatorLabelText: { color: '#64748B', fontSize: 12, fontWeight: '700', letterSpacing: 1, marginBottom: 12, textTransform: 'uppercase' },
-  genderChipRow: { flexDirection: 'column', marginBottom: 12 },
+  genderChipRow: { flexDirection: 'column', gap: 8, marginBottom: 12 },
   premiumCustomCheckboxCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#111111', padding: 16, borderRadius: 14, marginBottom: 10, borderWidth: 1, borderColor: '#222222' },
   checkboxCardActive: { borderColor: '#FF6B00', backgroundColor: '#160B02' },
-  customCircleIndicatorCheck: { width: 18, height: 28, borderRadius: 9, borderWidth: 2, borderColor: '#475569', marginRight: 14 },
+  customCircleIndicatorCheck: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#475569', marginRight: 14 },
   circleIndicatorChecked: { borderColor: '#FF6B00', backgroundColor: '#FF6B00' },
   checkboxLabelText: { color: '#F8FAFC', fontSize: 15, fontWeight: '700' },
   splitSelectionColumnWrap: { flexDirection: 'column', gap: 8, marginBottom: 12 },
@@ -521,8 +519,8 @@ const styles = StyleSheet.create({
   splitSelectionRowChipActive: { borderColor: '#FF6B00', backgroundColor: '#160B02' },
   splitChipMainText: { color: '#94A3B8', fontSize: 14, fontWeight: '700' },
   splitChipMainTextActive: { color: '#F8FAFC' },
-  dynamicSplitExplanationContainer: { backgroundColor: '#111111', padding: 14, borderRadius: 10, marginVertical: 8, borderWidth: 1, borderColor: '#222222' },
-  explanationTextContent: { color: '#64748B', fontSize: 13, lineHeight: 18, fontWeight: '500' },
+  inlineExplanationWrapper: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#222222' },
+  inlineExplanationText: { color: '#64748B', fontSize: 13, lineHeight: 18, fontWeight: '500' },
   header: { padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#111111' },
   headerLabel: { fontSize: 11, fontWeight: '800', color: '#FF6B00', letterSpacing: 1.5 },
   workoutTitle: { fontSize: 22, fontWeight: 'bold', color: '#F8FAFC', marginTop: 2 },

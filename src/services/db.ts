@@ -107,10 +107,9 @@ export async function initDatabase(): Promise<void> {
 }
 
 /**
- * Seeds our complete 85+ exercise registry with strict anatomical multipliers
+ * Seeds our complete exercise registry with strict anatomical multipliers
  */
 async function seedMasterExercises(db: SQLite.SQLiteDatabase): Promise<void> {
-  // Master Raw Array compiled straight from your matrix JSON specifications
   const rawMatrix = [
     { name: "Flat Machine Chest Press", primary: "Chest", sub: "Middle Chest", difficulty: 1, gender: "U" },
     { name: "Incline Machine Chest Press", primary: "Chest", sub: "Upper Chest", difficulty: 1, gender: "U" },
@@ -177,34 +176,33 @@ async function seedMasterExercises(db: SQLite.SQLiteDatabase): Promise<void> {
     { name: "Lying Leg Curl", primary: "Legs", sub: "Hamstrings", difficulty: 1, gender: "U" },
     { name: "Seated Leg Curl", primary: "Legs", sub: "Hamstrings", difficulty: 1, gender: "U" },
     { name: "Machine Hip Thrust", primary: "Legs", sub: "Glutes", difficulty: 1, gender: "F" },
-    { name: "Seated Hip Adductor Machine", "primary": "Legs", sub: "Adductors", difficulty: 1, gender: "F" },
-    { name: "Seated Hip Abductor Machine", "primary": "Legs", sub: "Abductors", difficulty: 1, gender: "F" },
-    { name: "Standing Calf Raise Machine", "primary": "Legs", sub: "Calves", difficulty: 1, gender: "U" },
-    { name: "Seated Calf Raise Machine", "primary": "Legs", sub: "Calves", difficulty: 1, gender: "U" },
-    { name: "Pendulum Squat Machine", "primary": "Legs", sub: "Quads", difficulty: 1, gender: "U" },
-    { name: "Cable Pull-Through", "primary": "Legs", sub: "Glutes", difficulty: 1, gender: "F" },
-    { name: "Barbell Hip Thrust", "primary": "Legs", sub: "Glutes", difficulty: 2, gender: "F" },
-    { name: "Barbell Back Squat", "primary": "Legs", sub: "Quads", difficulty: 2, gender: "U" },
-    { name: "Bulgarian Split Squat", "primary": "Legs", sub: "Quads", difficulty: 2, gender: "U" },
-    { name: "Romanian Deadlift (Barbell)", "primary": "Legs", sub: "Hamstrings", difficulty: 2, gender: "U" },
-    { name: "Dumbbell Romanian Deadlift", "primary": "Legs", sub: "Hamstrings", difficulty: 2, gender: "U" },
-    { name: "Walking Dumbbell Lunge", "primary": "Legs", sub: "Quads", difficulty: 2, gender: "U" },
-    { name: "Barbell Front Squat", "primary": "Legs", sub: "Quads", difficulty: 3, gender: "U" },
-    { name: "Sumo Deadlift", "primary": "Legs", sub: "Glutes", difficulty: 3, gender: "U" },
-    { name: "Machine Abdominal Crunch", "primary": "Abs", sub: "Upper Abs", difficulty: 1, gender: "U" },
-    { name: "Hanging Knee Raise", "primary": "Abs", sub: "Lower Abs", difficulty: 1, gender: "U" },
-    { name: "Cable Crunch", "primary": "Abs", sub: "Upper Abs", difficulty: 1, gender: "U" },
-    { name: "Cable Woodchopper", "primary": "Abs", sub: "Obliques", difficulty: 1, gender: "U" },
-    { name: "Captain's Chair Leg Raise", "primary": "Abs", sub: "Lower Abs", difficulty: 1, gender: "U" },
-    { name: "Hanging Leg Raise", "primary": "Abs", sub: "Lower Abs", difficulty: 2, gender: "U" },
-    { name: "Decline Bench Sit-Up", "primary": "Abs", sub: "Upper Abs", difficulty: 2, gender: "U" },
-    { name: "Russian Twist (Dumbbell)", "primary": "Abs", sub: "Obliques", difficulty: 2, gender: "U" },
-    { name: "Dragon Flag", "primary": "Abs", sub: "Upper Abs", difficulty: 3, gender: "M" }
+    { name: "Seated Hip Adductor Machine", primary: "Legs", sub: "Adductors", difficulty: 1, gender: "F" },
+    { name: "Seated Hip Abductor Machine", primary: "Legs", sub: "Abductors", difficulty: 1, gender: "F" },
+    { name: "Standing Calf Raise Machine", primary: "Legs", sub: "Calves", difficulty: 1, gender: "U" },
+    { name: "Seated Calf Raise Machine", primary: "Legs", sub: "Calves", difficulty: 1, gender: "U" },
+    { name: "Pendulum Squat Machine", primary: "Legs", sub: "Quads", difficulty: 1, gender: "U" },
+    { name: "Cable Pull-Through", primary: "Legs", sub: "Glutes", difficulty: 1, gender: "F" },
+    { name: "Barbell Hip Thrust", primary: "Legs", sub: "Glutes", difficulty: 2, gender: "F" },
+    { name: "Barbell Back Squat", primary: "Legs", sub: "Quads", difficulty: 2, gender: "U" },
+    { name: "Bulgarian Split Squat", primary: "Legs", sub: "Quads", difficulty: 2, gender: "U" },
+    { name: "Romanian Deadlift (Barbell)", primary: "Legs", sub: "Hamstrings", difficulty: 2, gender: "U" },
+    { name: "Dumbbell Romanian Deadlift", primary: "Legs", sub: "Hamstrings", difficulty: 2, gender: "U" },
+    { name: "Walking Dumbbell Lunge", primary: "Legs", sub: "Quads", difficulty: 2, gender: "U" },
+    { name: "Barbell Front Squat", primary: "Legs", sub: "Quads", difficulty: 3, gender: "U" },
+    { name: "Sumo Deadlift", primary: "Legs", sub: "Glutes", difficulty: 3, gender: "U" },
+    { name: "Machine Abdominal Crunch", primary: "Abs", sub: "Upper Abs", difficulty: 1, gender: "U" },
+    { name: "Hanging Knee Raise", primary: "Abs", sub: "Lower Abs", difficulty: 1, gender: "U" },
+    { name: "Cable Crunch", primary: "Abs", sub: "Upper Abs", difficulty: 1, gender: "U" },
+    { name: "Cable Woodchopper", primary: "Abs", sub: "Obliques", difficulty: 1, gender: "U" },
+    { name: "Captain's Chair Leg Raise", primary: "Abs", sub: "Lower Abs", difficulty: 1, gender: "U" },
+    { name: "Hanging Leg Raise", primary: "Abs", sub: "Lower Abs", difficulty: 2, gender: "U" },
+    { name: "Decline Bench Sit-Up", primary: "Abs", sub: "Upper Abs", difficulty: 2, gender: "U" },
+    { name: "Russian Twist (Dumbbell)", primary: "Abs", sub: "Obliques", difficulty: 2, gender: "U" },
+    { name: "Dragon Flag", primary: "Abs", sub: "Upper Abs", difficulty: 3, gender: "M" }
   ];
 
   for (const item of rawMatrix) {
-    // Multiplier allocation rule based on primary targets
-    let multiplier = 0.15; // Defaults down to isolation arm tracking threshold
+    let multiplier = 0.15;
     if (item.primary === 'Legs') multiplier = 0.50;
     else if (item.primary === 'Chest') multiplier = 0.40;
     else if (item.primary === 'Back') multiplier = 0.35;
@@ -223,7 +221,6 @@ async function seedMasterExercises(db: SQLite.SQLiteDatabase): Promise<void> {
  * Seeds framework definitions for 3-Day, 4-Day, and 5-Day splits
  */
 async function seedPredefinedRoutines(db: SQLite.SQLiteDatabase): Promise<void> {
-  // 1. Seed 3-Day Split Blueprint Rows
   const splitsDef = [
     { name: 'Workout A (Push Day A)', split: '3_DAY', order: 1 },
     { name: 'Workout B (Pull Day A)', split: '3_DAY', order: 2 },
@@ -232,13 +229,11 @@ async function seedPredefinedRoutines(db: SQLite.SQLiteDatabase): Promise<void> 
     { name: 'Workout E (Pull Day B)', split: '3_DAY', order: 5 },
     { name: 'Workout F (Legs Day B)', split: '3_DAY', order: 6 },
     
-    // 2. Seed 4-Day Split Blueprint Rows
     { name: 'Day 1: Chest & Triceps', split: '4_DAY', order: 1 },
     { name: 'Day 2: Back', split: '4_DAY', order: 2 },
     { name: 'Day 3: Shoulder & Biceps', split: '4_DAY', order: 3 },
     { name: 'Day 4: Legs', split: '4_DAY', order: 4 },
 
-    // 3. Seed 5-Day Split Blueprint Rows (Hypertrophy Bro-Split Framework)
     { name: 'Day 1: Chest Day', split: '5_DAY', order: 1 },
     { name: 'Day 2: Back Day', split: '5_DAY', order: 2 },
     { name: 'Day 3: Arms Day', split: '5_DAY', order: 3 },
@@ -253,8 +248,6 @@ async function seedPredefinedRoutines(db: SQLite.SQLiteDatabase): Promise<void> 
     );
   }
 
-  // To build out the mapping link layer dynamically, we create an automated builder script 
-  // that queries exercises based on your structural definitions text and binds them seamlessly.
   await linkPredefinedWorkoutExercises(db);
 }
 
@@ -262,13 +255,11 @@ async function seedPredefinedRoutines(db: SQLite.SQLiteDatabase): Promise<void> 
  * Connects exercises to routine splits matching the structural criteria
  */
 async function linkPredefinedWorkoutExercises(db: SQLite.SQLiteDatabase): Promise<void> {
-  // Helper to fetch matching exercise ID safely from the seeded database rows
   const findExerciseId = async (name: string): Promise<number> => {
     const res = await db.getFirstAsync<{ id: number }>('SELECT id FROM exercises WHERE name = ?;', [name]);
     return res ? res.id : 1;
   };
 
-  // Example mappings linking standard initial exercises to prevent layout failure
   const workoutRows = await db.getAllAsync<{ id: number; name: string; split_type: string }>('SELECT id, name, split_type FROM workouts;');
 
   for (const w of workoutRows) {
@@ -285,9 +276,20 @@ async function linkPredefinedWorkoutExercises(db: SQLite.SQLiteDatabase): Promis
       await db.runAsync('INSERT INTO workout_exercises (workout_id, exercise_id, sequence_order, target_sets, target_reps) VALUES (?, ?, 1, 3, 10);', [w.id, e1]);
       await db.runAsync('INSERT INTO workout_exercises (workout_id, exercise_id, sequence_order, target_sets, target_reps) VALUES (?, ?, 2, 3, 10);', [w.id, e2]);
     } else {
-      // Fallback binding mapping to keep empty views clear during initialization
       const defaultEx = await findExerciseId('Push-Up');
       await db.runAsync('INSERT INTO workout_exercises (workout_id, exercise_id, sequence_order, target_sets, target_reps) VALUES (?, ?, 1, 3, 10);', [w.id, defaultEx]);
     }
   }
+}
+
+/**
+ * Purges historical progress records and logs completely out of local SQLite tables
+ */
+export async function clearAllLogsAndHistory(): Promise<void> {
+  const db = await getDatabaseConnection();
+  await db.execAsync(`
+    DELETE FROM completed_workouts;
+    DELETE FROM calendar_logs;
+    VACUUM;
+  `);
 }
