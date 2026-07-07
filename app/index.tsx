@@ -13,23 +13,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getDatabaseConnection, initDatabase } from '../src/services/db';
-import { useUserStore } from '../src/services/store';
+import { ActiveTrackedExercise, useUserStore } from '../src/services/store';
 
-interface ActiveTrackedExercise {
-  workout_exercise_id: number;
-  exercise_id: number;
+interface MasterExerciseRow {
+  id: number;
   name: string;
   primary_muscle: string;
   sub_muscle: string;
   difficulty: number;
   gender: string;
   base_multiplier: number;
-  sets: Array<{
-    id: string;
-    weight: string;
-    reps: string;
-    isCompleted: boolean;
-  }>;
 }
 
 export default function WorkspaceDashboard() {
@@ -42,11 +35,24 @@ export default function WorkspaceDashboard() {
   const [trackedExercises, setTrackedExercises] = useState<ActiveTrackedExercise[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   
-  const [isModalVisible, setIsModalVisible] = useState<boolean>(false);
-  const [customName, setCustomName] = useState<string>('');
-  const [customPrimary, setCustomPrimary] = useState<string>('Chest');
-  const [customSub, setCustomSub] = useState<string>('');
+  // Advanced Exercise Library Search States
+  const [isAddModalVisible, setIsAddModalVisible] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedMuscleFilter, setSelectedMuscleFilter] = useState<string>('All');
+  const [fullExerciseLibrary, setFullExerciseLibrary] = useState<MasterExerciseRow[]>([]);
 
+  // Local Undo Notification States
+  const [undoExerciseBuffer, setUndoExerciseBuffer] = useState<ActiveTrackedExercise | null>(null);
+  const [undoIndexBuffer, setUndoIndexBuffer] = useState<number | null>(null);
+  const [showUndoBanner, setShowUndoBanner] = useState<boolean>(false);
+  const [undoTimeoutId, setUndoIndexTimeoutId] = useState<any | null>(null);
+
+  // Custom Creation Modal Substates
+  const [isCreateModalVisible, setIsCreateModalVisible] = useState<boolean>(false);
+  const [newExerciseName, setNewExerciseName] = useState<string>('');
+  const [newExerciseMuscle, setNewExerciseMuscle] = useState<string>('Chest');
+
+  // Form Onboarding Values
   const [formAge, setFormAge] = useState<number>(22);
   const [formWeight, setFormWeight] = useState<number>(75);
   const [formHeight, setFormHeight] = useState<number>(175);
@@ -54,23 +60,14 @@ export default function WorkspaceDashboard() {
   const [formExp, setFormExp] = useState<'Beginner' | 'Familiar' | 'Advanced'>('Beginner');
   const [formSplit, setFormSplit] = useState<'3_DAY' | '4_DAY' | '5_DAY' | 'CUSTOM'>('5_DAY');
 
-  const splitDescriptions = {
-    '3_DAY': 'Alternating Push, Pull, Legs sequence loop. Excellent for baseline motor recovery paths.',
-    '4_DAY': '4-Day strategic split targeting Chest/Triceps, Back, Shoulder/Biceps, and Legs sequentially.',
-    '5_DAY': 'Premium Hypertrophy Bro-Split sequence targeting explicit standalone muscle groups daily.',
-    'CUSTOM': 'Be your own master. Select your own exercises and make your custom split.'
-  };
-
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsSplashing(false);
-    }, 500);
-
+    const timer = setTimeout(() => setIsSplashing(false), 500);
     async function bootTrackingEngine() {
       try {
         await initDatabase();
         if (store.isOnboarded) {
-          await loadCurrentActiveWorkoutDay();
+          await loadActiveSessionLayout();
+          await fetchMasterLibraryRegistry();
         }
       } catch (error) {
         console.error('Initialization error:', error);
@@ -78,25 +75,39 @@ export default function WorkspaceDashboard() {
         setIsLoading(false);
       }
     }
-
     bootTrackingEngine();
     return () => clearTimeout(timer);
   }, [store.isOnboarded, store.currentWorkoutDayOrder]);
 
-  async function loadCurrentActiveWorkoutDay() {
+  async function fetchMasterLibraryRegistry() {
+    try {
+      const db = await getDatabaseConnection();
+      const rows = await db.getAllAsync<MasterExerciseRow>('SELECT id, name, primary_muscle, sub_muscle, difficulty, gender, base_multiplier FROM exercises ORDER BY name ASC;');
+      setFullExerciseLibrary(rows);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function loadActiveSessionLayout() {
     const db = await getDatabaseConnection();
     const currentWorkout = await db.getFirstAsync<{ id: number; name: string }>(
       'SELECT id, name FROM workouts WHERE split_type = ? AND day_order = ?;',
       [store.activeSplit, store.currentWorkoutDayOrder]
     );
 
-    if (!currentWorkout) {
-      setActiveWorkoutName(store.activeSplit === 'CUSTOM' ? 'Custom Session' : `${store.activeSplit.replace('_', ' ')} Session`);
-      setTrackedExercises([]);
+    setActiveWorkoutName(currentWorkout ? currentWorkout.name : (store.activeSplit === 'CUSTOM' ? 'Custom Split' : `${store.activeSplit.replace('_', ' ')} Split`));
+
+    // 🌟 Check Zustand persistence layer cache first before loading a stock seed template row
+    if (store.activeSessionCache && store.activeSessionCache.length > 0) {
+      setTrackedExercises(store.activeSessionCache);
       return;
     }
 
-    setActiveWorkoutName(currentWorkout.name);
+    if (!currentWorkout) {
+      setTrackedExercises([]);
+      return;
+    }
 
     const exercisesList = await db.getAllAsync<{
       workout_exercise_id: number;
@@ -148,47 +159,117 @@ export default function WorkspaceDashboard() {
     });
 
     setTrackedExercises(massagedExercises);
+    store.updateActiveSessionCache(massagedExercises);
+  }
+
+  // Wraps updates to sync local edits back to persistent memory arrays immediately
+  function updateStateAndCache(updated: ActiveTrackedExercise[]) {
+    setTrackedExercises(updated);
+    store.updateActiveSessionCache(updated);
+  }
+
+  const handleAddSet = (exerciseIndex: number) => {
+    const updated = [...trackedExercises];
+    const targetEx = updated[exerciseIndex];
+    const newIndex = targetEx.sets.length;
+    
+    // Copy properties from preceding row defaults safely
+    const baseWeight = newIndex > 0 ? targetEx.sets[newIndex - 1].weight : '20';
+    const baseReps = newIndex > 0 ? targetEx.sets[newIndex - 1].reps : '10';
+
+    targetEx.sets.push({
+      id: `${targetEx.workout_exercise_id}_${Date.now()}`,
+      weight: baseWeight,
+      reps: baseReps,
+      isCompleted: false
+    });
+    updateStateAndCache(updated);
+  };
+
+  const handleRemoveSet = (exerciseIndex: number) => {
+    const updated = [...trackedExercises];
+    const targetEx = updated[exerciseIndex];
+    
+    if (targetEx.sets.length > 1) {
+      targetEx.sets.pop();
+      updateStateAndCache(updated);
+    } else {
+      // 🌟 Trigger 3-second non-destructive countdown Undo Banner buffer sequence
+      if (undoTimeoutId) clearTimeout(undoTimeoutId);
+      
+      setUndoExerciseBuffer(targetEx);
+      setUndoIndexBuffer(exerciseIndex);
+      setShowUndoBanner(true);
+
+      const filtered = updated.filter((_, idx) => idx !== exerciseIndex);
+      updateStateAndCache(filtered);
+
+      const timeout = setTimeout(() => {
+        setShowUndoBanner(false);
+        setUndoExerciseBuffer(null);
+        setUndoIndexBuffer(null);
+      }, 3000);
+      setUndoIndexTimeoutId(timeout);
+    }
+  };
+
+  function triggerUndoExerciseRestoration() {
+    if (undoExerciseBuffer === null || undoIndexBuffer === null) return;
+    if (undoTimeoutId) clearTimeout(undoTimeoutId);
+
+    const restored = [...trackedExercises];
+    restored.splice(undoIndexBuffer, 0, undoExerciseBuffer);
+    
+    updateStateAndCache(restored);
+    setShowUndoBanner(false);
+    setUndoExerciseBuffer(null);
+    setUndoIndexBuffer(null);
   }
 
   const toggleSetCompletion = (exerciseIndex: number, setIndex: number) => {
     const updated = [...trackedExercises];
     updated[exerciseIndex].sets[setIndex].isCompleted = !updated[exerciseIndex].sets[setIndex].isCompleted;
-    setTrackedExercises(updated);
+    updateStateAndCache(updated);
   };
 
-  async function handleAddCustomExercise() {
-    if (!customName.trim()) return;
+  async function handleAddExerciseFromLibrary(ex: MasterExerciseRow) {
+    const appendedExercise: ActiveTrackedExercise = {
+      workout_exercise_id: Date.now(),
+      exercise_id: ex.id,
+      name: ex.name,
+      primary_muscle: ex.primary_muscle,
+      sub_muscle: ex.sub_muscle,
+      difficulty: ex.difficulty,
+      gender: ex.gender,
+      base_multiplier: ex.base_multiplier,
+      sets: [
+        { id: `${Date.now()}_0`, weight: '20', reps: '10', isCompleted: false },
+        { id: `${Date.now()}_1`, weight: '20', reps: '10', isCompleted: false },
+        { id: `${Date.now()}_2`, weight: '20', reps: '10', isCompleted: false }
+      ]
+    };
+    const updatedList = [...trackedExercises, appendedExercise];
+    updateStateAndCache(updatedList);
+    setIsAddModalVisible(false);
+    alert(`${ex.name} Added!`);
+  }
+
+  async function handleCreateAndInsertCustomExercise() {
+    if (!newExerciseName.trim()) return;
     try {
       const db = await getDatabaseConnection();
-      const verifiedSub = customSub.trim() ? customSub.trim() : 'General Custom';
-      
       await db.runAsync(
-        `INSERT OR IGNORE INTO exercises (name, primary_muscle, sub_muscle, difficulty, gender, base_multiplier) VALUES (?, ?, ?, ?, ?, ?);`,
-        [customName, customPrimary, verifiedSub, 1, 'U', 0.20]
+        'INSERT OR IGNORE INTO exercises (name, primary_muscle, sub_muscle, difficulty, gender, base_multiplier) VALUES (?, ?, ?, ?, ?, ?);',
+        [newExerciseName.trim(), newExerciseMuscle, 'Custom Input', 1, 'U', 0.25]
       );
-
-      const targetEx = await db.getFirstAsync<{ id: number }>('SELECT id FROM exercises WHERE name = ?;', [customName]);
-      if (!targetEx) return;
-
-      const appendedExercise: ActiveTrackedExercise = {
-        workout_exercise_id: Date.now(),
-        exercise_id: targetEx.id,
-        name: customName,
-        primary_muscle: customPrimary,
-        sub_muscle: verifiedSub,
-        difficulty: 1,
-        gender: 'U',
-        base_multiplier: 0.20,
-        sets: [
-          { id: `${Date.now()}_0`, weight: '20', reps: '10', isCompleted: false },
-          { id: `${Date.now()}_1`, weight: '20', reps: '10', isCompleted: false }
-        ]
-      };
-
-      setTrackedExercises([...trackedExercises, appendedExercise]);
-      setCustomName('');
-      setCustomSub('');
-      setIsModalVisible(false);
+      await fetchMasterLibraryRegistry();
+      
+      const verifiedRow = await db.getFirstAsync<MasterExerciseRow>('SELECT id, name, primary_muscle, sub_muscle, difficulty, gender, base_multiplier FROM exercises WHERE name = ?;', [newExerciseName.trim()]);
+      if (verifiedRow) {
+        handleAddExerciseFromLibrary(verifiedRow);
+      }
+      setNewExerciseName('');
+      setIsCreateModalVisible(false);
     } catch (err) {
       console.error(err);
     }
@@ -204,7 +285,6 @@ export default function WorkspaceDashboard() {
         ex.sets.forEach(s => { if (s.isCompleted) totalSets++; });
       });
 
-      // 1. Log workout master row
       const result = await db.runAsync(
         'INSERT INTO completed_workouts (workout_name, split_type, date_logged, total_sets_completed) VALUES (?, ?, ?, ?);',
         [activeWorkoutName, store.activeSplit, timestamp, totalSets]
@@ -212,13 +292,11 @@ export default function WorkspaceDashboard() {
 
       const insertedWorkoutId = result.lastInsertRowId;
 
-      // 2. Log granular completed exercise sets for non-editable summary modal views
       for (const ex of trackedExercises) {
         const completedSets = ex.sets.filter(s => s.isCompleted);
         for (let i = 0; i < completedSets.length; i++) {
           await db.runAsync(
-            `INSERT INTO completed_workout_sets (completed_workout_id, exercise_name, weight_logged, reps_logged, set_order)
-             VALUES (?, ?, ?, ?, ?);`,
+            'INSERT INTO completed_workout_sets (completed_workout_id, exercise_name, weight_logged, reps_logged, set_order) VALUES (?, ?, ?, ?, ?);',
             [insertedWorkoutId, ex.name, completedSets[i].weight, completedSets[i].reps, i + 1]
           );
         }
@@ -229,7 +307,7 @@ export default function WorkspaceDashboard() {
         [timestamp, 'WORKOUT', insertedWorkoutId]
       );
 
-      alert('Workout Cleanly Logged! 💪');
+      alert('Workout Successfully Saved! 🏋️‍♂️');
       store.advanceToNextWorkoutDay();
     } catch (err) {
       console.error(err);
@@ -245,6 +323,13 @@ export default function WorkspaceDashboard() {
       experienceLevel: formExp,
       activeSplit: formSplit
     });
+  }
+
+  function getFormattedHeaderDate() {
+    const today = new Date();
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${days[today.getDay()]}, ${months[today.getMonth()]} ${today.getDate()}`;
   }
 
   if (isSplashing) {
@@ -340,11 +425,7 @@ export default function WorkspaceDashboard() {
                 { key: 'M', label: 'Male' },
                 { key: 'F', label: 'Female' }
               ] as const).map(g => (
-                <TouchableOpacity 
-                  key={g.key} 
-                  style={[styles.premiumCustomCheckboxCard, formGender === g.key && styles.checkboxCardActive]} 
-                  onPress={() => setFormGender(g.key)}
-                >
+                <TouchableOpacity key={g.key} style={[styles.premiumCustomCheckboxCard, formGender === g.key && styles.checkboxCardActive]} onPress={() => setFormGender(g.key)}>
                   <View style={[styles.customCircleIndicatorCheck, formGender === g.key && styles.circleIndicatorChecked]} />
                   <Text style={styles.checkboxLabelText}>{g.label}</Text>
                 </TouchableOpacity>
@@ -358,11 +439,7 @@ export default function WorkspaceDashboard() {
                 { key: 'Familiar', desc: 'Familiar (3-12 months)' },
                 { key: 'Advanced', desc: 'Advanced (12+ months)' }
               ] as const).map(level => (
-                <TouchableOpacity 
-                  key={level.key} 
-                  style={[styles.splitSelectionRowChip, formExp === level.key && styles.splitSelectionRowChipActive]} 
-                  onPress={() => setFormExp(level.key)}
-                >
+                <TouchableOpacity key={level.key} style={[styles.splitSelectionRowChip, formExp === level.key && styles.splitSelectionRowChipActive]} onPress={() => setFormExp(level.key)}>
                   <Text style={[styles.splitChipMainText, formExp === level.key && styles.splitChipMainTextActive]}>{level.desc}</Text>
                 </TouchableOpacity>
               ))}
@@ -378,15 +455,16 @@ export default function WorkspaceDashboard() {
               ] as const).map(split => {
                 const isActive = formSplit === split.key;
                 return (
-                  <TouchableOpacity 
-                    key={split.key} 
-                    style={[styles.splitSelectionRowChip, isActive && styles.splitSelectionRowChipActive]} 
-                    onPress={() => setFormSplit(split.key)}
-                  >
+                  <TouchableOpacity key={split.key} style={[styles.splitSelectionRowChip, isActive && styles.splitSelectionRowChipActive]} onPress={() => setFormSplit(split.key)}>
                     <Text style={[styles.splitChipMainText, isActive && styles.splitChipMainTextActive]}>{split.label}</Text>
                     {isActive && (
                       <View style={styles.inlineExplanationWrapper}>
-                        <Text style={styles.inlineExplanationText}>{splitDescriptions[split.key]}</Text>
+                        <Text style={styles.inlineExplanationText}>
+                          {split.key === '3_DAY' && 'Alternating Push, Pull, Legs sequence loop. Excellent for baseline motor recovery paths.'}
+                          {split.key === '4_DAY' && '4-Day strategic split targeting Chest/Triceps, Back, Shoulder/Biceps, and Legs sequentially.'}
+                          {split.key === '5_DAY' && 'Premium Hypertrophy Bro-Split sequence targeting explicit standalone muscle groups daily.'}
+                          {split.key === 'CUSTOM' && 'Be your own master. Select your own exercises and make your custom split.'}
+                        </Text>
                       </View>
                     )}
                   </TouchableOpacity>
@@ -406,17 +484,31 @@ export default function WorkspaceDashboard() {
     );
   }
 
+  // Filter exercises dynamically based on search string and muscle group selection chips
+  const filteredLibrary = fullExerciseLibrary.filter(ex => {
+    const matchesSearch = ex.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesMuscle = selectedMuscleFilter === 'All' || ex.primary_muscle === selectedMuscleFilter;
+    return matchesSearch && matchesMuscle;
+  });
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerLabel}>QUEUE DAY {store.currentWorkoutDayOrder}</Text>
+          <Text style={styles.headerLabel}>{getFormattedHeaderDate()}</Text>
           <Text style={styles.workoutTitle}>{activeWorkoutName}</Text>
         </View>
-        <TouchableOpacity style={styles.customBtn} onPress={() => setIsModalVisible(true)}>
-          <Text style={styles.customBtnText}>+ Custom Movement</Text>
+        <TouchableOpacity style={styles.customBtn} onPress={() => setIsAddModalVisible(true)}>
+          <Text style={styles.customBtnText}>+ Add Exercise</Text>
         </TouchableOpacity>
       </View>
+
+      {/* 🌟 3-SECOND COUNTDOWN DISMISSAL UNDO ACTION BANNER */}
+      {trackedExercises.length === 0 && (
+        <View style={styles.emptyTrackerWarningState}>
+          <Text style={styles.emptyTrackerWarningText}>No movements active. Click Add Exercise above.</Text>
+        </View>
+      )}
 
       <FlatList
         data={trackedExercises}
@@ -425,28 +517,51 @@ export default function WorkspaceDashboard() {
         renderItem={({ item: exercise, index: exIdx }) => (
           <View style={styles.exerciseCard}>
             <View style={styles.exerciseHeader}>
-              <Text style={styles.exerciseName}>{exercise.name}</Text>
-              <Text style={styles.muscleBadge}>{exercise.primary_muscle}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.exerciseName}>{exercise.name}</Text>
+                <Text style={styles.subAnatomicalText}>{exercise.sub_muscle}</Text>
+              </View>
+              
+              {/* Set Mutation Controls row overlay mapping */}
+              <View style={styles.setsMutationRowButtonWrapper}>
+                <TouchableOpacity style={styles.setCountCtrlBtn} onPress={() => handleRemoveSet(exIdx)}>
+                  <Text style={styles.setCountCtrlBtnText}>-</Text>
+                </TouchableOpacity>
+                <Text style={styles.setsCounterValueDisplay}>{exercise.sets.length}</Text>
+                <TouchableOpacity style={styles.setCountCtrlBtn} onPress={() => handleAddSet(exIdx)}>
+                  <Text style={styles.setCountCtrlBtnText}>+</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {exercise.sets.map((set, setIdx) => (
               <View key={set.id} style={[styles.setRow, set.isCompleted && styles.setRowCompleted]}>
                 <Text style={styles.setNumberLabel}>Set {setIdx + 1}</Text>
                 <View style={styles.inputWrap}>
-                  <TextInput style={styles.numericInput} value={set.weight} keyboardType="numeric" onChangeText={(txt) => {
-                    const updated = [...trackedExercises];
-                    updated[exIdx].sets[setIdx].weight = txt;
-                    setTrackedExercises(updated);
-                  }} />
+                  <TextInput 
+                    style={styles.numericInput} 
+                    value={set.weight} 
+                    keyboardType="numeric" 
+                    onChangeText={(txt) => {
+                      const updated = [...trackedExercises];
+                      updated[exIdx].sets[setIdx].weight = txt;
+                      updateStateAndCache(updated);
+                    }} 
+                  />
                   <Text style={styles.inputUnit}>kg</Text>
                 </View>
 
                 <View style={styles.inputWrap}>
-                  <TextInput style={styles.numericInput} value={set.reps} keyboardType="numeric" onChangeText={(txt) => {
-                    const updated = [...trackedExercises];
-                    updated[exIdx].sets[setIdx].reps = txt;
-                    setTrackedExercises(updated);
-                  }} />
+                  <TextInput 
+                    style={styles.numericInput} 
+                    value={set.reps} 
+                    keyboardType="numeric" 
+                    onChangeText={(txt) => {
+                      const updated = [...trackedExercises];
+                      updated[exIdx].sets[setIdx].reps = txt;
+                      updateStateAndCache(updated);
+                    }} 
+                  />
                   <Text style={styles.inputUnit}>reps</Text>
                 </View>
 
@@ -459,34 +574,101 @@ export default function WorkspaceDashboard() {
         )}
       />
 
+      {/* Persistent Live Non-destructive Undo Notification Floating Bar component */}
+      {showUndoBanner && (
+        <View style={styles.undoNotificationBannerFloatingBlock}>
+          <Text style={styles.undoTextDescriptionLabel}>Exercise removed</Text>
+          <TouchableOpacity onPress={triggerUndoExerciseRestoration}>
+            <Text style={styles.undoActionOrangeButtonText}>UNDO</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={styles.footer}>
         <TouchableOpacity style={styles.finishBtn} onPress={handleFinishWorkoutSession}>
-          <Text style={styles.finishBtnText}>Finish Workout Session (Advance Queue)</Text>
+          <Text style={styles.finishBtnText}>Save Workout</Text>
         </TouchableOpacity>
       </View>
 
-      <Modal visible={isModalVisible} transparent animationType="slide">
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Add Custom Exercise</Text>
-            <Text style={styles.fieldLabel}>Exercise Name</Text>
-            <TextInput style={styles.formInput} placeholder="e.g., Incline Dumbbell Fly" placeholderTextColor="#64748B" value={customName} onChangeText={setCustomName} />
+      {/* 📅 DYNAMIC SEARCH & MUSCLE CHIPS REGISTRY LIBRARY MODAL OVERLAY */}
+      <Modal visible={isAddModalVisible} animationType="slide" transparent>
+        <View style={styles.searchModalBackdrop}>
+          <View style={styles.searchModalInnerContainer}>
+            <View style={styles.searchModalTopBarHeader}>
+              <Text style={styles.searchModalTitle}>Add Exercise</Text>
+              <TouchableOpacity style={styles.newMovementTriggerBtn} onPress={() => setIsCreateModalVisible(true)}>
+                <Text style={styles.newMovementTriggerBtnText}>+ New Exercise</Text>
+              </TouchableOpacity>
+            </View>
 
-            <Text style={styles.fieldLabel}>Primary Muscle Target Group</Text>
-            <View style={styles.pickerAlternativeRow}>
-              {['Chest', 'Back', 'Biceps', 'Triceps', 'Shoulder', 'Legs'].map((muscle) => (
-                <TouchableOpacity key={muscle} style={[styles.pickerChip, customPrimary === muscle && styles.pickerChipActive]} onPress={() => setCustomPrimary(muscle)}>
-                  <Text style={[styles.pickerChipText, customPrimary === muscle && styles.pickerChipTextActive]}>{muscle}</Text>
+            <TextInput
+              style={styles.searchBarInputField}
+              placeholder="Search exercise registry..."
+              placeholderTextColor="#64748B"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+
+            {/* Premium Anatomical Scrollable Filter Chips row implementation */}
+            <View style={{ height: 45, marginVertical: 4 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 4 }}>
+                {['All', 'Chest', 'Back', 'Biceps', 'Triceps', 'Shoulder', 'Legs', 'Abs'].map(muscle => {
+                  const isSel = selectedMuscleFilter === muscle;
+                  return (
+                    <TouchableOpacity key={muscle} style={[styles.muscleSelectFilterChip, isSel && styles.muscleSelectFilterChipActive]} onPress={() => setSelectedMuscleFilter(muscle)}>
+                      <Text style={[styles.muscleSelectFilterChipText, isSel && styles.muscleSelectFilterChipTextActive]}>{muscle}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            <FlatList
+              data={filteredLibrary}
+              keyExtractor={(item) => item.id.toString()}
+              contentContainerStyle={{ paddingBottom: 20 }}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.exerciseLibraryOptionRow} onPress={() => handleAddExerciseFromLibrary(item)}>
+                  <View>
+                    <Text style={styles.libraryItemNameText}>{item.name}</Text>
+                    <Text style={styles.libraryItemMuscleLabelText}>{item.primary_muscle} · {item.sub_muscle}</Text>
+                  </View>
+                  <Text style={styles.libraryItemAddPlusLabelText}>+</Text>
+                </TouchableOpacity>
+              )}
+            />
+
+            <TouchableOpacity style={styles.closeSearchModalBtn} onPress={() => setIsAddModalVisible(false)}>
+              <Text style={styles.closeSearchModalBtnText}>Close Library</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* NESTED RAW CUSTOM CREATION SUBMODAL */}
+      <Modal visible={isCreateModalVisible} transparent animationType="fade">
+        <View style={styles.searchModalBackdrop}>
+          <View style={styles.customCreationContainerPanel}>
+            <Text style={styles.customCreationTitle}>Create Custom Exercise</Text>
+            <Text style={styles.creationLabelFieldText}>Exercise Name</Text>
+            <TextInput style={styles.formInputTextRowField} placeholder="e.g., Incline Dumbbell Hammer Curl" placeholderTextColor="#64748B" value={newExerciseName} onChangeText={setNewExerciseName} />
+
+            <Text style={styles.creationLabelFieldText}>Primary Anatomical Group</Text>
+            <View style={styles.creationMusclePickerRowWrap}>
+              {['Chest', 'Back', 'Biceps', 'Triceps', 'Shoulder', 'Legs', 'Abs'].map(m => (
+                <TouchableOpacity key={m} style={[styles.creationMuscleChipElement, newExerciseMuscle === m && styles.creationMuscleChipElementActive]} onPress={() => setNewExerciseMuscle(m)}>
+                  <Text style={[styles.creationMuscleChipElementText, newExerciseMuscle === m && styles.creationMuscleChipElementTextActive]}>{m}</Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            <Text style={styles.fieldLabel}>Sub Category (Optional)</Text>
-            <TextInput style={styles.formInput} placeholder="Leaves blank for General Custom" placeholderTextColor="#64748B" value={customSub} onChangeText={setCustomSub} />
-
-            <View style={styles.modalActionRow}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setIsModalVisible(false)}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.saveBtn} onPress={handleAddCustomExercise}><Text style={styles.saveBtnText}>Add Movement</Text></TouchableOpacity>
+            <View style={styles.creationActionButtonsRowGroup}>
+              <TouchableOpacity style={styles.creationCancelButton} onPress={() => setIsCreateModalVisible(false)}>
+                <Text style={styles.creationCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.creationSaveButton} onPress={handleCreateAndInsertCustomExercise}>
+                <Text style={styles.creationSaveButtonText}>Create Movement</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -532,16 +714,23 @@ const styles = StyleSheet.create({
   splitChipMainTextActive: { color: '#F8FAFC' },
   inlineExplanationWrapper: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#222222' },
   inlineExplanationText: { color: '#64748B', fontSize: 13, lineHeight: 18, fontWeight: '500' },
+  
   header: { padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#111111' },
-  headerLabel: { fontSize: 11, fontWeight: '800', color: '#FF6B00', letterSpacing: 1.5 },
+  headerLabel: { fontSize: 11, fontWeight: '800', color: '#FF6B00', letterSpacing: 1.5, textTransform: 'uppercase' },
   workoutTitle: { fontSize: 22, fontWeight: 'bold', color: '#F8FAFC', marginTop: 2 },
-  customBtn: { backgroundColor: '#111111', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#222222' },
-  customBtnText: { color: '#FF6B00', fontWeight: '700', fontSize: 13 },
-  listContent: { padding: 16, paddingBottom: 100 },
+  customBtn: { backgroundColor: '#111111', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#222222' },
+  customBtnText: { color: '#FF6B00', fontWeight: '800', fontSize: 13 },
+  emptyTrackerWarningState: { padding: 24, backgroundColor: '#111111', margin: 16, borderRadius: 12, borderWidth: 1, borderColor: '#222222' },
+  emptyTrackerWarningText: { color: '#64748B', fontSize: 14, fontWeight: '600', textAlign: 'center' },
+  listContent: { padding: 16, paddingBottom: 120 },
   exerciseCard: { backgroundColor: '#111111', borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#222222' },
   exerciseHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  exerciseName: { fontSize: 16, fontWeight: 'bold', color: '#F8FAFC', flex: 1 },
-  muscleBadge: { fontSize: 11, fontWeight: '600', color: '#94A3B8', backgroundColor: '#222222', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
+  exerciseName: { fontSize: 16, fontWeight: 'bold', color: '#F8FAFC', letterSpacing: -0.2 },
+  subAnatomicalText: { color: '#64748B', fontSize: 12, fontWeight: '600', marginTop: 2 },
+  setsMutationRowButtonWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#000000', borderRadius: 12, padding: 4, borderWidth: 1, borderColor: '#222222' },
+  setCountCtrlBtn: { width: 28, height: 28, borderRadius: 6, backgroundColor: '#111111', justifyContent: 'center', alignItems: 'center' },
+  setCountCtrlBtnText: { color: '#FF6B00', fontSize: 15, fontWeight: '800' },
+  setsCounterValueDisplay: { color: '#F8FAFC', paddingHorizontal: 12, fontSize: 13, fontWeight: '800' },
   setRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#000000', padding: 10, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: '#111111' },
   setRowCompleted: { borderColor: '#3A1D02', backgroundColor: '#160B02' },
   setNumberLabel: { fontSize: 13, fontWeight: '600', color: '#64748B', width: 45 },
@@ -551,22 +740,45 @@ const styles = StyleSheet.create({
   checkSquare: { width: 28, height: 28, borderWidth: 2, borderColor: '#222222', borderRadius: 6, justifyContent: 'center', alignItems: 'center', backgroundColor: '#111111' },
   checkSquareChecked: { borderColor: '#FF6B00', backgroundColor: '#FF6B00' },
   checkIcon: { color: '#000000', fontWeight: '900', fontSize: 16 },
+  
+  undoNotificationBannerFloatingBlock: { position: 'absolute', bottom: 90, left: 16, right: 16, backgroundColor: '#1E293B', padding: 14, borderRadius: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#475569', zIndex: 999 },
+  undoTextDescriptionLabel: { color: '#F8FAFC', fontSize: 14, fontWeight: '700' },
+  undoActionOrangeButtonText: { color: '#FF6B00', fontSize: 14, fontWeight: '900', letterSpacing: 0.5 },
+  
   footer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#000000', padding: 16, borderTopWidth: 1, borderTopColor: '#111111' },
-  finishBtn: { backgroundColor: '#FF6B00', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
-  finishBtnText: { color: '#000000', fontWeight: '800', fontSize: 15 },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.85)', justifyContent: 'center', padding: 20 },
-  modalContainer: { backgroundColor: '#111111', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: '#222222' },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#F8FAFC', marginBottom: 16 },
-  fieldLabel: { fontSize: 13, fontWeight: '600', color: '#64748B', marginBottom: 6, marginTop: 12 },
-  formInput: { backgroundColor: '#000000', color: '#F8FAFC', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#222222', fontSize: 14 },
-  pickerAlternativeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 4 },
-  pickerChip: { backgroundColor: '#111111', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#222222' },
-  pickerChipActive: { backgroundColor: '#FF6B00', borderColor: '#FF6B00' },
-  pickerChipText: { color: '#64748B', fontSize: 13, fontWeight: '600' },
-  pickerChipTextActive: { color: '#000000', fontWeight: '800' },
-  modalActionRow: { flexDirection: 'row', gap: 12, marginTop: 24, justifyContent: 'flex-end' },
-  cancelBtn: { paddingHorizontal: 16, paddingVertical: 10 },
-  cancelBtnText: { color: '#64748B', fontWeight: '600' },
-  saveBtn: { backgroundColor: '#FF6B00', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 },
-  saveBtnText: { color: '#000000', fontWeight: '700' }
+  finishBtn: { backgroundColor: '#FF6B00', paddingVertical: 14, borderRadius: 30, alignItems: 'center' },
+  finishBtnText: { color: '#000000', fontWeight: '900', fontSize: 15, letterSpacing: 0.5 },
+  
+  searchModalBackdrop: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.85)', justifyContent: 'flex-end' },
+  searchModalInnerContainer: { backgroundColor: '#111111', borderTopLeftRadius: 24, borderTopRightRadius: 24, height: '85%', padding: 20, borderWidth: 1, borderColor: '#222222' },
+  searchModalTopBarHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  searchModalTitle: { fontSize: 20, fontWeight: '900', color: '#F8FAFC' },
+  newMovementTriggerBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: '#000000', borderWidth: 1, borderColor: '#222222' },
+  newMovementTriggerBtnText: { color: '#FF6B00', fontSize: 12, fontWeight: '800' },
+  searchBarInputField: { backgroundColor: '#000000', color: '#F8FAFC', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#222222', fontSize: 14, marginBottom: 8 },
+  muscleSelectFilterChip: { backgroundColor: '#000000', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#222222', height: 36, justifyContent: 'center' },
+  muscleSelectFilterChipActive: { backgroundColor: '#FF6B00', borderColor: '#FF6B00' },
+  muscleSelectFilterChipText: { color: '#64748B', fontSize: 13, fontWeight: '700' },
+  muscleSelectFilterChipTextActive: { color: '#000000', fontWeight: '900' },
+  exerciseLibraryOptionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#000000', padding: 14, borderRadius: 12, marginTop: 8, borderWidth: 1, borderColor: '#222222' },
+  libraryItemNameText: { color: '#F8FAFC', fontSize: 15, fontWeight: '700' },
+  libraryItemMuscleLabelText: { color: '#64748B', fontSize: 12, fontWeight: '600', marginTop: 2 },
+  libraryItemAddPlusLabelText: { color: '#FF6B00', fontSize: 18, fontWeight: '900' },
+  closeSearchModalBtn: { backgroundColor: '#FFFFFF', paddingVertical: 14, borderRadius: 30, alignItems: 'center', marginTop: 10 },
+  closeSearchModalBtnText: { color: '#000000', fontWeight: '900', fontSize: 14 },
+  
+  customCreationContainerPanel: { backgroundColor: '#111111', borderRadius: 20, padding: 20, margin: 16, width: '90%', alignSelf: 'center', borderColor: '#222222', borderWidth: 1 },
+  customCreationTitle: { fontSize: 18, fontWeight: '900', color: '#F8FAFC', marginBottom: 14 },
+  creationLabelFieldText: { color: '#64748B', fontSize: 12, fontWeight: '700', marginBottom: 6 },
+  formInputTextRowField: { backgroundColor: '#000000', color: '#F8FAFC', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#222222', fontSize: 14, marginBottom: 14 },
+  creationMusclePickerRowWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 20 },
+  creationMuscleChipElement: { backgroundColor: '#000000', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#222222' },
+  creationMuscleChipElementActive: { backgroundColor: '#FF6B00', borderColor: '#FF6B00' },
+  creationMuscleChipElementText: { color: '#64748B', fontSize: 12, fontWeight: '700' },
+  creationMuscleChipElementTextActive: { color: '#000000', fontWeight: '900' },
+  creationActionButtonsRowGroup: { flexDirection: 'row', gap: 12, justifyContent: 'flex-end' },
+  creationCancelButton: { padding: 10 },
+  creationCancelButtonText: { color: '#64748B', fontWeight: '700' },
+  creationSaveButton: { backgroundColor: '#FF6B00', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 },
+  creationSaveButtonText: { color: '#000000', fontWeight: '800' }
 });

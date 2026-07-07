@@ -1,10 +1,25 @@
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Pre-installed with your Expo stack layout
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
-// Strict State Interfaces aligned with Phase 2 relational database filters
+export interface ActiveTrackedExercise {
+  workout_exercise_id: number;
+  exercise_id: number;
+  name: string;
+  primary_muscle: string;
+  sub_muscle: string;
+  difficulty: number;
+  gender: string;
+  base_multiplier: number;
+  sets: Array<{
+    id: string;
+    weight: string;
+    reps: string;
+    isCompleted: boolean;
+  }>;
+}
+
 interface UserState {
-  // Biometric & Profile States
   isOnboarded: boolean;
   age: number;
   weight: number; 
@@ -14,12 +29,13 @@ interface UserState {
   activeSplit: '3_DAY' | '4_DAY' | '5_DAY' | 'CUSTOM';
   currentWorkoutDayOrder: number; 
 
-  // Integrated Rest Timer States 
+  // 🌟 Temporary active workspace state cache to prevent data loss on unintended closeouts
+  activeSessionCache: ActiveTrackedExercise[] | null;
+
   timerId: any | null; 
   isTimerRunning: boolean;
   timeRemaining: number; 
 
-  // Actions Mappings
   completeOnboarding: (params: {
     age: number;
     weight: number;
@@ -30,8 +46,8 @@ interface UserState {
   }) => void;
   resetAllData: () => void;
   advanceToNextWorkoutDay: () => void;
+  updateActiveSessionCache: (cache: ActiveTrackedExercise[] | null) => void;
   
-  // Rest Timer Controller Actions
   setTimerId: (id: any | null) => void;
   setTimerRunning: (running: boolean) => void;
   tickTimer: () => void;
@@ -41,7 +57,6 @@ interface UserState {
 export const useUserStore = create<UserState>()(
   persist(
     (set, get) => ({
-      // Default Seed Parameters
       isOnboarded: false,
       age: 0,
       weight: 0,
@@ -50,12 +65,12 @@ export const useUserStore = create<UserState>()(
       experienceLevel: 'Beginner',
       activeSplit: '5_DAY',
       currentWorkoutDayOrder: 1,
+      activeSessionCache: null, // Default empty state layer
 
       timerId: null,
       isTimerRunning: false,
       timeRemaining: 120,
 
-      // Action: Commit Onboarding Configuration Inputs
       completeOnboarding: (params) =>
         set({
           isOnboarded: true,
@@ -65,15 +80,12 @@ export const useUserStore = create<UserState>()(
           gender: params.gender,
           experienceLevel: params.experienceLevel,
           activeSplit: params.activeSplit,
+          activeSessionCache: null, // Flush cache on fresh onboarding trigger
         }),
 
-      // Action: Hard Factory Storage Reset with Explicit Thread Cleanup
       resetAllData: () => {
         const state = get();
-        if (state.timerId) {
-          clearInterval(state.timerId);
-        }
-
+        if (state.timerId) clearInterval(state.timerId);
         set({
           isOnboarded: false,
           age: 0,
@@ -83,32 +95,28 @@ export const useUserStore = create<UserState>()(
           experienceLevel: 'Beginner',
           activeSplit: '5_DAY',
           currentWorkoutDayOrder: 1,
+          activeSessionCache: null,
           timerId: null,
           isTimerRunning: false,
           timeRemaining: 120,
         });
       },
 
-      // Action: Advance the workout queue position cleanly based on routine split bounds
       advanceToNextWorkoutDay: () =>
         set((state) => {
           let nextDay = state.currentWorkoutDayOrder + 1;
           const split = state.activeSplit;
 
-          if (split === '5_DAY' && nextDay > 5) {
-            nextDay = 1;
-          } else if (split === '3_DAY' && nextDay > 6) { 
-            nextDay = 1;
-          } else if (split === '4_DAY' && nextDay > 4) {
-            nextDay = 1;
-          } else if (split === 'CUSTOM' && nextDay > 7) { 
-            nextDay = 1;
-          }
+          if (split === '5_DAY' && nextDay > 5) nextDay = 1;
+          else if (split === '3_DAY' && nextDay > 6) nextDay = 1;
+          else if (split === '4_DAY' && nextDay > 4) nextDay = 1;
+          else if (split === 'CUSTOM' && nextDay > 7) nextDay = 1;
 
-          return { currentWorkoutDayOrder: nextDay };
+          return { currentWorkoutDayOrder: nextDay, activeSessionCache: null };
         }),
 
-      // Rest Timer Native Hooks Binding Mutations
+      updateActiveSessionCache: (cache) => set({ activeSessionCache: cache }),
+
       setTimerId: (id) => set({ timerId: id }),
       setTimerRunning: (running) => set({ isTimerRunning: running }),
       tickTimer: () =>
@@ -126,9 +134,8 @@ export const useUserStore = create<UserState>()(
       },
     }),
     {
-      name: 'gym-core-user-storage', // Persistent key descriptor
-      storage: createJSONStorage(() => AsyncStorage), // Native device filesystem engine proxy hook
-      // Exclude running background interval processes loops from serialization graphs safely
+      name: 'gym-core-user-storage',
+      storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         isOnboarded: state.isOnboarded,
         age: state.age,
@@ -138,6 +145,7 @@ export const useUserStore = create<UserState>()(
         experienceLevel: state.experienceLevel,
         activeSplit: state.activeSplit,
         currentWorkoutDayOrder: state.currentWorkoutDayOrder,
+        activeSessionCache: state.activeSessionCache, // Persists active state rows safely across restarts
       }),
     }
   )
