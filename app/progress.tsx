@@ -20,11 +20,6 @@ interface CompletedSetDetail {
   set_order: number;
 }
 
-interface HistoricalWeekRange {
-  label: string;
-  seedDate: Date;
-}
-
 export default function ProgressScreen() {
   const [logs, setLogs] = useState<CompletedWorkoutLog[]>([]);
   const [completedDatesMap, setCompletedDatesMap] = useState<Record<string, boolean>>({});
@@ -41,13 +36,14 @@ export default function ProgressScreen() {
   const [workoutDetails, setWorkoutDetails] = useState<CompletedSetDetail[]>([]);
   const [isLedgerModalVisible, setIsLedgerModalVisible] = useState<boolean>(false);
 
-  // Computes a target 7-day strip based on a dynamic reference pivot date object context
+  // Computes a target 7-day strip based on a dynamic reference pivot date object context (Monday to Sunday)
   const calculateWeekFromPivot = useCallback((pivotDate: Date) => {
     const currentDayOfWeek = pivotDate.getDay(); 
+    // Adjust distance so week begins on Monday
     const distanceToMonday = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek;
     
     const mondayObject = new Date(pivotDate);
-    mondayObject.setDate(pivotDate.getDate() + distanceToMonday);
+    mondayObject.setDate(mondayObject.getDate() + distanceToMonday);
 
     const weekLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const generatedWeek = [];
@@ -66,29 +62,7 @@ export default function ProgressScreen() {
     setCurrentWeekDays(generatedWeek);
   }, []);
 
-  // Generate a list of 4 past week range blocks to pick from dynamically
-  const generatePastWeekOptions = () => {
-    const choices = [{ label: 'Current Week', seedDate: new Date() }];
-    
-    for (let i = 1; i <= 4; i++) {
-      const pastSeed = new Date();
-      pastSeed.setDate(pastSeed.getDate() - i * 7);
-      
-      const dayOfWeek = pastSeed.getDay();
-      const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-      const mon = new Date(pastSeed);
-      mon.setDate(pastSeed.getDate() + diff);
-      
-      const sun = new Date(mon);
-      sun.setDate(mon.getDate() + 6);
-
-      const labelString = `Wk: ${mon.getMonth() + 1}/${mon.getDate()} - ${sun.getMonth() + 1}/${sun.getDate()}`;
-      choices.push({ label: labelString, seedDate: pastSeed });
-    }
-    return choices;
-  };
-
-  // Queries SQLite based on active date string constraints
+  // Queries SQLite database logs for historical summaries within the weekly window bounds
   const fetchWeekFilteredHistory = useCallback(async () => {
     if (currentWeekDays.length === 0) return;
     
@@ -151,9 +125,11 @@ export default function ProgressScreen() {
     }
   }
 
-  function handleSelectHistoricalWeek(seedDate: Date) {
-    setReferencePivotDate(seedDate);
-    setSelectedDateString(seedDate.toISOString().split('T')[0]);
+  // Processes raw day grid click event to capture the corresponding full weekly block array
+  function handleSelectCalendarGridDay(dayNum: number) {
+    const chosenDate = new Date(referencePivotDate.getFullYear(), referencePivotDate.getMonth(), dayNum);
+    setReferencePivotDate(chosenDate);
+    setSelectedDateString(chosenDate.toISOString().split('T')[0]);
     setIsCalendarModalVisible(false);
     setIsLoading(true);
   }
@@ -161,6 +137,53 @@ export default function ProgressScreen() {
   function cleanWorkoutName(name: string) {
     return name.replace(/^(Day \d+:\s*|Workout [A-F]\s*\(?)/gi, '').replace(/\)$/g, '').trim();
   }
+
+  // Generates the layout cells array for a full actual calendar month view grid representation
+  function renderModalCalendarGridCells() {
+    const year = referencePivotDate.getFullYear();
+    const month = referencePivotDate.getMonth();
+    
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    const cells = [];
+    
+    // Previous month padding empty cells alignment
+    for (let i = 0; i < firstDayIndex; i++) {
+      cells.push(<View key={`empty-${i}`} style={styles.modalCalendarEmptyCell} />);
+    }
+    
+    // Active month selectable cells mapping
+    for (let day = 1; day <= totalDaysInMonth; day++) {
+      const dayDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const hasWorkout = completedDatesMap[dayDateStr];
+      const isCurrentlyActiveSelectedDay = selectedDateStr === dayDateStr;
+
+      cells.push(
+        <TouchableOpacity
+          key={`day-${day}`}
+          style={[
+            styles.modalCalendarDayCell, 
+            isCurrentlyActiveSelectedDay && styles.modalCalendarDayCellSelected,
+            hasWorkout && !isCurrentlyActiveSelectedDay && styles.modalCalendarDayCellWithWorkout
+          ]}
+          onPress={() => handleSelectCalendarGridDay(day)}
+        >
+          <Text style={[styles.modalCalendarDayCellText, isCurrentlyActiveSelectedDay && styles.modalCalendarDayCellTextSelected]}>
+            {day}
+          </Text>
+          {hasWorkout && <View style={[styles.modalCellCheckDot, isCurrentlyActiveSelectedDay && styles.modalCellCheckDotSelected]} />}
+        </TouchableOpacity>
+      );
+    }
+    
+    return cells;
+  }
+
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
 
   if (isLoading) {
     return (
@@ -170,7 +193,6 @@ export default function ProgressScreen() {
     );
   }
 
-  // Groups sets by exercise name dynamically for modal layout segmentation
   const groupedExercises: Record<string, CompletedSetDetail[]> = {};
   workoutDetails.forEach((s) => {
     if (!groupedExercises[s.exercise_name]) {
@@ -181,7 +203,6 @@ export default function ProgressScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      {/* Header Control Row */}
       <View style={styles.topHeaderControlRow}>
         <Text style={styles.headerTitle}>Training History</Text>
         <TouchableOpacity 
@@ -193,7 +214,7 @@ export default function ProgressScreen() {
         </TouchableOpacity>
       </View>
       
-      {/* Horizontal Strip */}
+      {/* Horizontal Monday-Sunday Day selection track strip element */}
       <View style={styles.weeklyCalendarHeaderStripContainer}>
         {currentWeekDays.map((item) => {
           const isSelected = selectedDateStr === item.dateString;
@@ -250,23 +271,36 @@ export default function ProgressScreen() {
         />
       )}
 
-      {/* RETROACTIVE WEEK PICKER MODAL */}
+      {/* 📅 PREMIUM METRO ACTUAL CALENDAR POPUP MODAL OVERLAY */}
       <Modal visible={isCalendarModalVisible} transparent animationType="fade">
         <View style={styles.modalBackdropOverlay}>
           <View style={styles.ledgerModalContainer}>
-            <Text style={styles.modalRoutineTitleText}>Select Training Week</Text>
-            <ScrollView style={{ gap: 8 }}>
-              {generatePastWeekOptions().map((opt, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={styles.historicalWeekOptionCard}
-                  onPress={() => handleSelectHistoricalWeek(opt.seedDate)}
-                >
-                  <Text style={styles.weekOptionLabelMainText}>{opt.label}</Text>
-                  <Text style={styles.weekSelectActionChevronText}>&gt;</Text>
-                </TouchableOpacity>
+            
+            {/* Calendar Month Header Controller Title Row */}
+            <View style={styles.modalCalendarMonthHeaderRow}>
+              <TouchableOpacity onPress={() => setReferencePivotDate(new Date(referencePivotDate.getFullYear(), referencePivotDate.getMonth() - 1, 1))}>
+                <Text style={styles.monthNavArrowText}>&lt;</Text>
+              </TouchableOpacity>
+              <Text style={styles.modalCalendarMonthTitle}>
+                {monthNames[referencePivotDate.getMonth()]} {referencePivotDate.getFullYear()}
+              </Text>
+              <TouchableOpacity onPress={() => setReferencePivotDate(new Date(referencePivotDate.getFullYear(), referencePivotDate.getMonth() + 1, 1))}>
+                <Text style={styles.monthNavArrowText}>&gt;</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Weekday Label Row */}
+            <View style={styles.modalCalendarWeekdaysLabelsRow}>
+              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((dayLabel, idx) => (
+                <Text key={idx} style={styles.modalWeekdayLabelText}>{dayLabel}</Text>
               ))}
-            </ScrollView>
+            </View>
+
+            {/* Grid Days Matrix Wrapper layout cell block */}
+            <View style={styles.modalCalendarGridMatrixContainer}>
+              {renderModalCalendarGridCells()}
+            </View>
+
             <TouchableOpacity style={styles.closeLedgerBtn} onPress={() => setIsCalendarModalVisible(false)}>
               <Text style={styles.closeLedgerBtnText}>Cancel</Text>
             </TouchableOpacity>
@@ -274,7 +308,7 @@ export default function ProgressScreen() {
         </View>
       </Modal>
 
-      {/* NON-EDITABLE GRANULAR DETAIL SUMMARY LEDGER MODAL */}
+      {/* NON-EDITABLE GRANULAR DRILL-DOWN LEDGER SUMMARY MODAL */}
       <Modal visible={isLedgerModalVisible} transparent animationType="fade">
         <View style={styles.modalBackdropOverlay}>
           <View style={styles.ledgerModalContainer}>
@@ -333,12 +367,25 @@ const styles = StyleSheet.create({
   timelineWorkoutName: { fontSize: 14, fontWeight: '700', color: '#F8FAFC', flex: 1, paddingHorizontal: 4 },
   timelineCountSetsHighlight: { fontSize: 13, fontWeight: '700', color: '#FF6B00', textAlign: 'right', width: '42%' },
 
-  historicalWeekOptionCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#000000', padding: 16, borderRadius: 12, marginBottom: 8, borderWidth: 1, borderColor: '#222222' },
-  weekOptionLabelMainText: { color: '#F8FAFC', fontSize: 14, fontWeight: '700' },
-  weekSelectActionChevronText: { color: '#FF6B00', fontSize: 14, fontWeight: '900' },
+  // Actual Calendar Grid Modal layout styling components
+  modalCalendarMonthHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingHorizontal: 4 },
+  monthNavArrowText: { color: '#FF6B00', fontSize: 18, fontWeight: '900', paddingHorizontal: 12 },
+  modalCalendarMonthTitle: { color: '#F8FAFC', fontSize: 17, fontWeight: '800' },
+  modalCalendarWeekdaysLabelsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8, borderBottomWidth: 1, borderBottomColor: '#222222', paddingBottom: 6 },
+  modalWeekdayLabelText: { color: '#64748B', fontSize: 12, fontWeight: '700', width: '14%', textAlign: 'center' },
+  modalCalendarGridMatrixContainer: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 8, justifyContent: 'flex-start', marginBottom: 16 },
+  modalCalendarDayCell: { width: '13.5%', aspectRatio: 1, backgroundColor: '#000000', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginHorizontal: '0.3%', borderWidth: 1, borderColor: '#111111' },
+  modalCalendarEmptyCell: { width: '13.5%', aspectRatio: 1, marginHorizontal: '0.3%' },
+  modalCalendarDayCellSelected: { backgroundColor: '#FF6B00', borderColor: '#FF6B00' },
+  modalCalendarDayCellWithWorkout: { borderColor: '#3A1D02', backgroundColor: '#160B02' },
+  modalCalendarDayCellText: { color: '#94A3B8', fontSize: 13, fontWeight: '700' },
+  modalCalendarDayCellTextSelected: { color: '#000000', fontWeight: '900' },
+  modalCellCheckDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#FF6B00', marginTop: 2 },
+  modalCellCheckDotSelected: { backgroundColor: '#000000' },
 
+  // Summary Ledger Layout Panel
   modalBackdropOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.85)', justifyContent: 'center', padding: 20 },
-  ledgerModalContainer: { backgroundColor: '#111111', borderRadius: 20, padding: 24, maxHeight: '80%', borderWidth: 1, borderColor: '#222222' },
+  ledgerModalContainer: { backgroundColor: '#111111', borderRadius: 20, padding: 24, maxHeight: '85%', borderWidth: 1, borderColor: '#222222' },
   modalMetaLabelText: { fontSize: 12, fontWeight: '800', color: '#64748B', letterSpacing: 1, textTransform: 'uppercase' },
   modalRoutineTitleText: { fontSize: 22, fontWeight: '900', color: '#F8FAFC', marginTop: 4, marginBottom: 20, letterSpacing: -0.4 },
   modalScrollContent: { marginVertical: 4 },
